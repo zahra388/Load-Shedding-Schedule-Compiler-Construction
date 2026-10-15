@@ -1,0 +1,6 @@
+{
+  "name": "Load-Shedding Schedule Compiler",
+  "description": "Compiler Construction Lab project at JUW: Lexer, Parser, AST, Symbol Table, Semantic Analyzer (R1-R7), TAC Generator, Optimizer, and TAC Execution Engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

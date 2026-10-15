@@ -1,0 +1,315 @@
+================================================================================
+LOAD-SHEDDING SCHEDULE COMPILER (LoadSheddingLang) — SYSTEM DESIGN SPECIFICATION
+Department of Computer Science and Software Engineering
+Jinnah University for Women (JUW) — Compiler Construction Lab Project
+================================================================================
+
+1. LANGUAGE OVERVIEW
+--------------------------------------------------------------------------------
+LoadSheddingLang is a domain-specific programming language (DSL) designed for
+electrical grid operators to declare feeders, technical loss percentages,
+feeder groups, exemption statuses (e.g. hospital feeders), and schedule blocks
+(weekday and weekend timetables).
+
+Key Design Principles:
+1. Dual-Keyword Lexicon: All keywords exist in both standard English and
+   fixed Roman Urdu forms. Both forms emit the identical token and can be
+   mixed freely within the same program or statement.
+2. Rigid Statement Termination: Every statement must terminate with a semicolon (;).
+3. Exact Arithmetic Constraints: Block durations must divide evenly into slots.
+4. Intermediate Representation: Timetables and feeder shedding hours are
+   derived by executing Three-Address Code (TAC), not by hardcoded calculations.
+5. Strict Multi-Phase Pipeline: Lexer -> Parser -> AST -> Symbol Table ->
+   Semantic Checker -> TAC Generator -> Optimizer -> TAC Virtual Machine.
+
+--------------------------------------------------------------------------------
+2. TOKEN & RESERVED-WORD TABLE
+--------------------------------------------------------------------------------
+The following table documents the complete reserved-word mappings and lexical tokens:
+
+| English Keyword | Roman Urdu Keyword | Token Name | Regular Expression / Pattern | Example Usage |
+|-----------------|--------------------|------------|------------------------------|---------------|
+| feeder          | feeder             | FEEDER     | [Ff][Ee][Ee][Dd][Ee][Rr]     | feeder Gulberg ... ; |
+| group           | giroh              | GROUP      | group | giroh                | group A / giroh B |
+| exempt          | mustasna           | EXEMPT     | exempt | mustasna            | exempt feeder Services; |
+| block           | block              | BLOCK      | block                        | block Weekday ... ; |
+| start           | shuru              | START      | start | shuru                | start 08:00 / shuru 08:00 |
+| end             | khatam             | END        | end | khatam                  | end 16:00 / khatam 16:00 |
+| slot            | waqfa              | SLOT       | slot | waqfa                  | slot 2 hours / waqfa 2 ghantay |
+| rotation        | bari               | ROTATION   | rotation | bari              | rotation A, B / bari A, B |
+| loss            | nuqsan             | LOSS       | loss | nuqsan                | loss 18% / nuqsan 18% |
+| max             | zyada_se_zyada     | MAX        | max | zyada_se_zyada          | max 4 hours / zyada_se_zyada 4 |
+| weekday         | hafta_war          | WEEKDAY    | weekday | hafta_war          | weekday block ... |
+| weekend         | hafta_akhir        | WEEKEND    | weekend | hafta_akhir        | weekend block ... |
+| compile         | tayar_karo         | COMPILE    | compile | tayar_karo          | compile; |
+| hours / hour    | ghantay / ghanta   | HOURS      | hours? | ghanta(y)?          | 4 hours / 2 ghantay |
+
+Additional Literals and Symbols:
+- IDENTIFIER : [a-zA-Z_][a-zA-Z0-9_]* (Names of feeders, groups, and blocks)
+- NUMBER     : \b\d+\b (Non-negative integers)
+- PERCENT    : \b\d+(\.\d+)?% (e.g. 18%, 35%)
+- TIME       : \b\d{1,2}:\d{2}\b (24-hour clock, e.g. 08:00, 16:00)
+- SEMICOLON  : ; (Statement terminator)
+- COMMA      : , (Rotation group separator)
+- BRACKETS   : [ ] (Optional rotation array enclosure)
+- COMMENTS   : //[^\n]* (Ignored by the lexer)
+
+--------------------------------------------------------------------------------
+3. FORMAL GRAMMAR (BNF / EBNF)
+--------------------------------------------------------------------------------
+program            ::= statement_list
+                     | empty
+
+statement_list     ::= statement_list statement
+                     | statement
+
+statement          ::= feeder_statement
+                     | exempt_statement
+                     | block_statement
+                     | compile_statement
+                     | error SEMICOLON
+
+feeder_statement   ::= FEEDER IDENTIFIER loss_opt GROUP IDENTIFIER max_opt SEMICOLON
+
+loss_opt           ::= LOSS PERCENT
+                     | empty
+
+max_opt            ::= MAX NUMBER hours_opt
+                     | empty
+
+exempt_statement   ::= EXEMPT FEEDER IDENTIFIER SEMICOLON
+                     | EXEMPT IDENTIFIER SEMICOLON
+
+block_statement    ::= BLOCK block_name START TIME END TIME SLOT NUMBER hours_opt ROTATION rotation_groups SEMICOLON
+                     | WEEKDAY BLOCK block_name_opt START TIME END TIME SLOT NUMBER hours_opt ROTATION rotation_groups SEMICOLON
+                     | WEEKEND BLOCK block_name_opt START TIME END TIME SLOT NUMBER hours_opt ROTATION rotation_groups SEMICOLON
+                     | BLOCK WEEKDAY block_name_opt START TIME END TIME SLOT NUMBER hours_opt ROTATION rotation_groups SEMICOLON
+                     | BLOCK WEEKEND block_name_opt START TIME END TIME SLOT NUMBER hours_opt ROTATION rotation_groups SEMICOLON
+
+block_name         ::= IDENTIFIER | WEEKDAY | WEEKEND
+
+block_name_opt     ::= block_name | empty
+
+hours_opt          ::= HOURS | empty
+
+rotation_groups    ::= group_sequence
+                     | LBRACKET group_sequence RBRACKET
+
+group_sequence     ::= group_sequence COMMA IDENTIFIER
+                     | group_sequence IDENTIFIER
+                     | IDENTIFIER
+
+compile_statement  ::= COMPILE SEMICOLON
+
+--------------------------------------------------------------------------------
+4. ABSTRACT SYNTAX TREE (AST) NODE ARCHITECTURE
+--------------------------------------------------------------------------------
+All AST nodes inherit from the `ASTNode` base class, which provides line-number
+tracking, nested child traversal, dictionary serialization for GUI visualizers,
+and recursive pretty-printing.
+
+Classes:
+1. ProgramNode(statements: list, lineno: int)
+   Root container holding sequential statement nodes.
+2. FeederNode(name: str, loss: float, group: str, max_hours: int, lineno: int)
+   Stores feeder technical parameters.
+3. ExemptNode(feeder_name: str, lineno: int)
+   Identifies feeders excluded from load-shedding schedules.
+4. ScheduleBlockNode(name: str, block_type: str, start_time: str, end_time: str,
+                     slot_hours: int, rotation: list, lineno: int)
+   Represents a distinct operational timetable period.
+5. TimeRangeNode(start_time: str, end_time: str, lineno: int)
+6. RotationNode(groups: list, lineno: int)
+7. CompileNode(lineno: int)
+
+--------------------------------------------------------------------------------
+5. SYMBOL TABLE DESIGN
+--------------------------------------------------------------------------------
+The Symbol Table (`SymbolTable`) manages global and block-scoped identifiers:
+- Records: SymbolEntry(name, kind, data_type, value, lineno, scope)
+- Kinds Supported:
+  * FEEDER: feeder declaration with loss, group assignment, and max hours.
+  * GROUP: collection of feeders mapped to an operational rotation key.
+  * EXEMPTION: feeder exemption declaration.
+  * BLOCK: schedule block definition with slot durations and time boundaries.
+- Verification Responsibilities:
+  * Detects duplicate feeder definitions at compile time.
+  * Ensures all references (e.g. exempted feeders, group names) resolve to
+    declared symbols.
+
+Formatted Output:
+NAME     | KIND    | TYPE / UNIT | LINE | SCOPE  | ATTRIBUTES / VALUE
+
+--------------------------------------------------------------------------------
+6. SEMANTIC RULES (R1–R7) & RATIONALE
+--------------------------------------------------------------------------------
+R1 — Unique Feeder & Group Assignment:
+   Every feeder must belong to exactly one group. Duplicate feeder names are
+   rejected with the source line number of both the duplicate and the original.
+
+R2 — Exempt Feeders:
+   An exempt feeder (e.g. Services / Hospital) must never receive load shedding,
+   even when its group's slot is active. Its shedding hours must always evaluate
+   to 0. Exempted feeders must also be verified as declared feeders.
+
+R3 — Maximum Shedding Hours Enforcement:
+   In every schedule block, no non-exempt feeder may receive scheduled shedding
+   hours in excess of its declared maximum.
+
+R4 — Exact Division into Slots:
+   The total duration (in minutes/hours) between the block's start time and
+   end time must divide evenly into the declared slot duration:
+   (End_Minutes - Start_Minutes) % (Slot_Hours * 60) == 0.
+
+R5 — Valid Group Rotation:
+   Every group specified in a rotation sequence must contain at least one
+   declared feeder. Furthermore, every declared feeder's group must appear in
+   the active schedule block rotation.
+
+R6 — Detailed Maximum-Hours Diagnostics:
+   When rule R3 is violated, the error message must explicitly state the
+   affected schedule block, feeder name, calculated shedding hours, and
+   permitted maximum.
+   Format: "Semantic error (line N): feeder <NAME> in block <BLOCK> receives
+   <ACTUAL> hours, exceeding its maximum of <MAX> hours. Reduce its scheduled
+   hours or increase its permitted maximum."
+
+R7 — Valid Clock & Time Durations:
+   Times must comply with the 24-hour clock (hours 00–23, minutes 00–59).
+   End time must strictly succeed start time. Durations and slot lengths
+   must be strictly positive.
+
+--------------------------------------------------------------------------------
+7. SCHEDULING FORMULAS
+--------------------------------------------------------------------------------
+Given a block with:
+  Start Time: H_s : M_s -> Start_Minutes = H_s * 60 + M_s
+  End Time  : H_e : M_e -> End_Minutes   = H_e * 60 + M_e
+  Slot Length: S_hours  -> Slot_Minutes  = S_hours * 60
+
+1. Total Duration (Minutes):
+   Duration_Minutes = End_Minutes - Start_Minutes
+2. Slot Count:
+   Number_of_Slots = Duration_Minutes / Slot_Minutes
+3. Slot Allocation:
+   For slot index i in [0, Number_of_Slots - 1]:
+     Assigned_Group = Rotation[i % len(Rotation)]
+     Slot_Start     = Start_Minutes + i * Slot_Minutes
+     Slot_End       = Slot_Start + Slot_Minutes
+4. Group Hours:
+   Group_Hours[G] = Count(Assigned_Group == G) * S_hours
+5. Feeder Hours:
+   For Feeder F in Group G:
+     Feeder_Hours[F] = 0 if F in Exemptions else Group_Hours[G]
+
+--------------------------------------------------------------------------------
+8. INTERMEDIATE CODE (THREE-ADDRESS CODE / TAC) SPECIFICATION
+--------------------------------------------------------------------------------
+Instruction Set Architecture:
+- Memory Assignment:      var = constant / operand
+- Arithmetic:             t_k = op1 (+, -, *, /) op2
+- Comparisons:            t_k = op1 (>=, <=, ==, >, <) op2
+- Conditional Branch:     IF cond_expr GOTO label
+- Unconditional Jump:     GOTO label
+- Label Definition:       label:
+- Domain VM Operations:
+  * ASSIGN_SLOT(slot_idx, group_name)
+  * CALC_FEEDER_HOURS(feeder_name, group_name)
+  * APPLY_EXEMPT(feeder_name)
+  * CHECK_MAX_HOURS(feeder_name, max_limit)
+
+Example Generated Code:
+  START_MINUTES_Weekday = 480
+  END_MINUTES_Weekday = 960
+  SLOT_HOURS_Weekday = 2
+  t1 = END_MINUTES_Weekday - START_MINUTES_Weekday
+  t2 = t1 / 60
+  t3 = t2 / SLOT_HOURS_Weekday
+  ROTATION_LEN_Weekday = 2
+  ROTATION_Weekday_0 = 'A'
+  ROTATION_Weekday_1 = 'B'
+  t4 = 0
+L1:
+  t5 = t4 >= t3
+  IF t5 == 1 GOTO L2
+  t6 = ROTATION_Weekday[t4 % 2]
+  ASSIGN_SLOT(t4, t6)
+  t7 = t4 + 1
+  t4 = t7
+  GOTO L1
+L2:
+
+--------------------------------------------------------------------------------
+9. OPTIMIZATION METHODOLOGY
+--------------------------------------------------------------------------------
+The compiler performs two independent optimization passes over the generated TAC:
+Pass 1: Constant Propagation & Constant Folding
+  - Identifies single-assignment variables containing constant literals.
+  - Precomputes arithmetic expressions at compile time:
+    * 960 - 480 -> 480
+    * 480 / 60 -> 8
+    * 8 / 2 -> 4 slots
+  - Protects loop induction variables (e.g. slot index `t4`) by verifying
+    assignment frequency and loop-carried dependencies.
+Pass 2: Dead Code Elimination (DCE)
+  - Identifies unreferenced temporary variables.
+  - Prunes dead intermediate instructions folded in Pass 1.
+  - Eliminates unreachable instructions immediately following unconditional GOTOs.
+
+Both unoptimized and optimized TAC are guaranteed to yield mathematically
+identical execution states, timetables, and validation checks.
+
+--------------------------------------------------------------------------------
+10. ERROR HANDLING POLICY
+--------------------------------------------------------------------------------
+Standard Error Formatting:
+- Lexical:   "Lexical error (line N): <problem>. <solution>."
+- Syntax:    "Syntax error (line N): <problem>. <solution>."
+- Semantic:  "Semantic error (line N): <problem>. <solution>."
+- Warnings:  "Warning (line N): <message>."
+
+Requirements:
+- Clean English phrasing with actionable guidance.
+- Phase Termination: If any phase reports errors, print errors, display
+  "Compilation stopped.", and withhold subsequent phases.
+- Zero Tracebacks: Never expose Python tracebacks or raw runtime exceptions.
+
+--------------------------------------------------------------------------------
+11. TEST SUITE MATRIX (tests/test01.txt - test09.txt)
+--------------------------------------------------------------------------------
+test01.txt: English Standard Weekday Scenario
+  - Feeders: Gulberg (A, 18%, 4h max), ModelTown (B, 35%, 6h max), Services (A, 0h max, Exempt).
+  - Result: SUCCESS. Gulberg 4h, ModelTown 4h, Services 0h.
+
+test02.txt: Roman Urdu Standard Weekday Scenario
+  - Keywords: feeder, nuqsan, giroh, zyada_se_zyada, mustasna, shuru, khatam, waqfa, bari.
+  - Result: SUCCESS. Output identical to test01.
+
+test03.txt: Mixed-Keyword Scenario
+  - Combines English and Roman Urdu within the same file and statements.
+  - Result: SUCCESS. Output identical to test01.
+
+test04.txt: Lexical Error
+  - Contains illegal character '@' on line 6.
+  - Result: LEXICAL ERROR reported, compilation stopped.
+
+test05.txt: Syntax Error
+  - Missing semicolon on line 5, triggering syntax recovery.
+  - Result: SYNTAX ERROR reported, compilation stopped.
+
+test06.txt: Semantic Rule R1 Violation
+  - Duplicate feeder definition for 'Gulberg'.
+  - Result: SEMANTIC ERROR reported, compilation stopped.
+
+test07.txt: Semantic Rule R4 Violation
+  - Block duration 7 hours (08:00 to 15:00) with 2-hour slots.
+  - Result: SEMANTIC ERROR reported (inexact slot division), compilation stopped.
+
+test08.txt: Semantic Rule R3 & R6 Violation
+  - Feeder Gulberg receives 6 hours in a 12-hour block (exceeds 4h max).
+  - Result: SEMANTIC ERROR reported (exceeds maximum hours), compilation stopped.
+
+test09.txt: Boundary Condition Test
+  - Feeder Gulberg scheduled hours (4h) exactly equal permitted maximum (4h).
+  - Result: SUCCESS (equality with maximum is explicitly valid).
+================================================================================

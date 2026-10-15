@@ -1,0 +1,9 @@
+// Expected Result: Gulberg 4 hours, ModelTown 4 hours, Services 0 hours (Exempt). Compilation succeeds identically to test01.
+// Standard Weekday Scenario - Roman Urdu Keywords Only
+
+feeder Gulberg nuqsan 18% giroh A zyada_se_zyada 4 ghantay;
+feeder ModelTown nuqsan 35% giroh B zyada_se_zyada 6 ghantay;
+feeder Services giroh A zyada_se_zyada 0 ghantay;
+mustasna feeder Services;
+
+block Weekday shuru 08:00 khatam 16:00 waqfa 2 ghantay bari A, B;

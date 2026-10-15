@@ -1,0 +1,9 @@
+// Expected Result: Gulberg 4 hours (Max 4h), ModelTown 4 hours (Max 6h), Services 0 hours (Exempt). Compilation succeeds because equality with maximum is allowed (Rule R3).
+// Boundary Case Test - Feeder Gulberg scheduled hours (4h) exactly equal its permitted maximum (4h)
+
+feeder Gulberg loss 18% group A max 4 hours;
+feeder ModelTown loss 35% group B max 6 hours;
+feeder Services group A max 0 hours;
+exempt feeder Services;
+
+block Weekday start 08:00 end 16:00 slot 2 hours rotation A, B;

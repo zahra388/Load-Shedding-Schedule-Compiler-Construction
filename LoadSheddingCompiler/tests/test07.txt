@@ -1,0 +1,9 @@
+// Expected Result: Semantic error (line 9): block 'Weekday' duration (7 hours from 08:00 to 15:00) does not divide exactly into slot length of 2 hours (Rule R4). Adjust duration or slot size. Compilation stopped.
+// Semantic Rule R4 Violation - Duration (7 hours) does not divide exactly into 2-hour slots
+
+feeder Gulberg loss 18% group A max 4 hours;
+feeder ModelTown loss 35% group B max 6 hours;
+feeder Services group A max 0 hours;
+exempt feeder Services;
+
+block Weekday start 08:00 end 15:00 slot 2 hours rotation A, B;

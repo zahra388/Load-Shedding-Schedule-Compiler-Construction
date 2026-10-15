@@ -1,0 +1,9 @@
+// Expected Result: Gulberg 4 hours, ModelTown 4 hours, Services 0 hours (Exempt). Compilation succeeds identically to test01 and test02.
+// Standard Weekday Scenario - Mixed English and Roman Urdu Keywords
+
+feeder Gulberg nuqsan 18% group A max 4 hours;
+feeder ModelTown loss 35% giroh B zyada_se_zyada 6 ghantay;
+feeder Services group A zyada_se_zyada 0 hours;
+mustasna feeder Services;
+
+block Weekday start 08:00 khatam 16:00 slot 2 ghantay rotation A, B;

@@ -1,0 +1,9 @@
+// Expected Result: Lexical error (line 6): unrecognized or illegal character '@'. Remove or replace this invalid character. Compilation stopped.
+// Lexical Error Test - Contains illegal character @
+
+feeder Gulberg loss 18% group A max 4 hours;
+feeder ModelTown loss 35% group B max 6 hours;
+feeder @Services group A max 0 hours;
+exempt feeder Services;
+
+block Weekday start 08:00 end 16:00 slot 2 hours rotation A, B;
